@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { checkDatabaseConnection } from './services/db';
 import { checkRedisConnection } from './services/redis';
+import authRouter from './routes/auth';
+import droneRouter from './routes/drone';
 
 // Load environment variables
 dotenv.config();
@@ -12,6 +14,10 @@ const port = process.env.PORT || 4000;
 
 app.use(cors());
 app.use(express.json());
+
+// Mount API routes
+app.use('/api/auth', authRouter);
+app.use('/api/drones', droneRouter);
 
 // Base health check endpoint
 app.get('/health', async (_req, res) => {
