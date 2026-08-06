@@ -1,0 +1,91 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String
+  name         String
+  role         String          @default("PILOT") // PILOT, ADMIN
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  sessions     FlightSession[]
+}
+
+model Drone {
+  id               String          @id @default(uuid())
+  name             String
+  serialNumber     String          @unique
+  model            String
+  status           String          @default("IDLE") // IDLE, TAKING_OFF, FLYING, RETURNING, LANDING, EMERGENCY, OFFLINE
+  batteryLevel     Int             @default(100)
+  currentLatitude  Float?
+  currentLongitude Float?
+  currentAltitude  Float?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  sessions         FlightSession[]
+  alerts           Alert[]
+}
+
+model Waypoint {
+  id         String   @id @default(uuid())
+  droneId    String
+  latitude   Float
+  longitude  Float
+  altitude   Float
+  speed      Float
+  orderIndex Int
+  createdAt  DateTime @default(now())
+}
+
+model FlightSession {
+  id               String         @id @default(uuid())
+  droneId          String
+  drone            Drone          @relation(fields: [droneId], references: [id], onDelete: Cascade)
+  pilotId          String?
+  pilot            User?          @relation(fields: [pilotId], references: [id])
+  startTime        DateTime       @default(now())
+  endTime          DateTime?
+  status           String         @default("ACTIVE") // ACTIVE, COMPLETED, ABORTED
+  distanceTraveled Float          @default(0.0)
+  avgSpeed         Float          @default(0.0)
+  maxAltitude      Float          @default(0.0)
+  batteryConsumed  Int            @default(0)
+  telemetryLogs    TelemetryLog[]
+  alerts           Alert[]
+  createdAt        DateTime       @default(now())
+}
+
+model TelemetryLog {
+  id              String        @id @default(uuid())
+  flightSessionId String
+  flightSession   FlightSession @relation(fields: [flightSessionId], references: [id], onDelete: Cascade)
+  timestamp       DateTime      @default(now())
+  latitude        Float
+  longitude       Float
+  altitude        Float
+  speed           Float
+  batteryLevel    Int
+  temperature     Float
+  signalStrength  Int
+}
+
+model Alert {
+  id              String         @id @default(uuid())
+  droneId         String
+  drone           Drone          @relation(fields: [droneId], references: [id], onDelete: Cascade)
+  flightSessionId String?
+  flightSession   FlightSession? @relation(fields: [flightSessionId], references: [id], onDelete: Cascade)
+  type            String         // LOW_BATTERY, HIGH_TEMP, SIGNAL_LOSS, GEOFENCE_VIOLATION
+  severity        String         // INFO, WARNING, CRITICAL
+  message         String
+  timestamp       DateTime       @default(now())
+  resolved        Boolean        @default(false)
+}
