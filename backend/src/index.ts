@@ -1,10 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { checkDatabaseConnection } from './services/db';
+import { checkDatabaseConnection, prisma } from './services/db';
 import { checkRedisConnection } from './services/redis';
 import authRouter from './routes/auth';
 import droneRouter from './routes/drone';
+import { initMqtt } from './services/mqtt';
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +53,34 @@ async function bootstrap() {
 
   if (dbConnected) {
     console.log('✔ PostgreSQL connection verified.');
+    try {
+      await prisma.drone.upsert({
+        where: { id: 'drone-alpha-111' },
+        update: {},
+        create: {
+          id: 'drone-alpha-111',
+          name: 'Alpha Scout',
+          serialNumber: 'SN-ALPHA111',
+          model: 'DJI Mavic 3 Pro',
+          status: 'IDLE',
+        },
+      });
+
+      await prisma.drone.upsert({
+        where: { id: 'drone-beta-222' },
+        update: {},
+        create: {
+          id: 'drone-beta-222',
+          name: 'Beta Sentinel',
+          serialNumber: 'SN-BETA222',
+          model: 'Freefly Alta X',
+          status: 'IDLE',
+        },
+      });
+      console.log('✔ Default simulated drones seeded in database.');
+    } catch (seedErr) {
+      console.error('Failed to seed default simulated drones:', seedErr);
+    }
   } else {
     console.warn('✖ WARNING: PostgreSQL connection failed.');
   }
@@ -61,6 +90,9 @@ async function bootstrap() {
   } else {
     console.warn('✖ WARNING: Redis connection failed.');
   }
+
+  // Start MQTT Telemetry Ingestion Client
+  initMqtt();
 
   app.listen(port, () => {
     console.log(`🚀 Server listening on http://localhost:${port}`);
