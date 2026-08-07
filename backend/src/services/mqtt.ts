@@ -2,6 +2,7 @@ import mqtt from 'mqtt';
 import { EventEmitter } from 'events';
 import { redis } from './redis';
 import { prisma } from './db';
+import { queueAlertCheck, queueFlightSessionCompilation } from './queue';
 
 const mqttUrl = process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
 
@@ -38,13 +39,26 @@ export function initMqtt() {
         const droneId = topicParts[1];
         const payload = JSON.parse(message.toString());
 
-        // 1. Emit telemetry event for real-time WebSockets pipe
+        // 1. Check for session completion (transition: has flightSessionId -> does not have flightSessionId)
+        const previousStateRaw = await redis.get(`drone:${droneId}:state`);
+        if (previousStateRaw) {
+          const previousState = JSON.parse(previousStateRaw);
+          if (previousState.flightSessionId && !payload.flightSessionId) {
+            console.log(`✈ Drone ${droneId} landed. Triggering post-flight compilation for session: ${previousState.flightSessionId}`);
+            await queueFlightSessionCompilation(previousState.flightSessionId);
+          }
+        }
+
+        // 2. Emit telemetry event for real-time WebSockets pipe
         telemetryEmitter.emit('telemetry', payload);
 
-        // 2. Cache the latest state in Redis (expires in 1 hour if drone goes offline)
+        // 3. Cache the latest state in Redis (expires in 1 hour if drone goes offline)
         await redis.set(`drone:${droneId}:state`, JSON.stringify(payload), 'EX', 3600);
 
-        // 3. Buffer logs in Redis for batch PostgreSQL insert (only when drone is actively in a flight session)
+        // 4. Queue off-thread safety alerts review
+        await queueAlertCheck(payload);
+
+        // 5. Buffer logs in Redis for batch PostgreSQL insert (only when drone is actively in a flight session)
         if (payload.flightSessionId) {
           await redis.rpush('telemetry:buffer:queue', JSON.stringify(payload));
         }

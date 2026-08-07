@@ -6,6 +6,9 @@ import { checkRedisConnection } from './services/redis';
 import authRouter from './routes/auth';
 import droneRouter from './routes/drone';
 import { initMqtt } from './services/mqtt';
+import { initSocket } from './services/socket';
+import { initAlertWorker } from './workers/alert';
+import { initAnalyticsWorker } from './workers/analytics';
 
 // Load environment variables
 dotenv.config();
@@ -94,9 +97,16 @@ async function bootstrap() {
   // Start MQTT Telemetry Ingestion Client
   initMqtt();
 
-  app.listen(port, () => {
+  // Start BullMQ background workers
+  initAlertWorker();
+  initAnalyticsWorker();
+
+  const server = app.listen(port, () => {
     console.log(`🚀 Server listening on http://localhost:${port}`);
   });
+
+  // Initialize WebSockets server
+  initSocket(server);
 }
 
 bootstrap().catch((err) => {
