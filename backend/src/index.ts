@@ -5,6 +5,8 @@ import { checkDatabaseConnection, prisma } from './services/db';
 import { checkRedisConnection } from './services/redis';
 import authRouter from './routes/auth';
 import droneRouter from './routes/drone';
+import sessionRouter from './routes/session';
+import analyticsRouter from './routes/analytics';
 import { initMqtt } from './services/mqtt';
 import { initSocket } from './services/socket';
 import { initAlertWorker } from './workers/alert';
@@ -22,6 +24,8 @@ app.use(express.json());
 // Mount API routes
 app.use('/api/auth', authRouter);
 app.use('/api/drones', droneRouter);
+app.use('/api/sessions', sessionRouter);
+app.use('/api/analytics', analyticsRouter);
 
 // Base health check endpoint
 app.get('/health', async (_req, res) => {
