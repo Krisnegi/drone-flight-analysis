@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/* Ensure Leaflet map fits perfectly inside its container card */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 0.75rem;
+  z-index: 10;
+}
+
+/* Custom scrollbars for stats and telemetry graphs lists */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
