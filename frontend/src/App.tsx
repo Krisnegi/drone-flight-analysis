@@ -10,7 +10,6 @@ import {
   Plus,
   Trash2,
   Navigation,
-  CheckCircle,
   Flame,
   Radio,
   Battery,
@@ -70,6 +69,7 @@ export default function App() {
   const [liveHistory, setLiveHistory] = useState<any[]>([]); // holds last 20 telemetry points of selected drone
   const [inspectedSession, setInspectedSession] = useState<FlightSession | null>(null);
   const [inspectedSessionTrack, setInspectedSessionTrack] = useState<TelemetryLog[]>([]);
+  const [logsPage, setLogsPage] = useState(1);
 
   // Forms States
   const [newDroneName, setNewDroneName] = useState('');
@@ -170,14 +170,14 @@ export default function App() {
         return prevDrones.map((d) =>
           d.id === payload.droneId
             ? {
-                ...d,
-                status: payload.status,
-                batteryLevel: payload.batteryLevel,
-                currentLatitude: payload.latitude,
-                currentLongitude: payload.longitude,
-                currentAltitude: payload.altitude,
-                isOnline: true,
-              }
+              ...d,
+              status: payload.status,
+              batteryLevel: payload.batteryLevel,
+              currentLatitude: payload.latitude,
+              currentLongitude: payload.longitude,
+              currentAltitude: payload.altitude,
+              isOnline: true,
+            }
             : d
         );
       });
@@ -192,7 +192,7 @@ export default function App() {
           });
           const newHistory = [...prev, { ...payload, time: timestamp }];
           // Allow tracking up to 500 ticks (~8.3 mins) to display the overall session trajectory
-          if (newHistory.length > 500) newHistory.shift(); 
+          if (newHistory.length > 500) newHistory.shift();
           return newHistory;
         });
       }
@@ -272,6 +272,11 @@ export default function App() {
     setLiveHistory([]);
     setWaypoints([]);
   }, [selectedDroneId]);
+
+  // Reset logs tab pagination page when switching tabs
+  useEffect(() => {
+    setLogsPage(1);
+  }, [activeTab]);
 
   // Fetch telemetry logs for session inspection
   const handleInspectSession = async (session: FlightSession) => {
@@ -353,7 +358,7 @@ export default function App() {
       // Reset coordinates and refresh drones list
       setWaypoints([]);
       setLiveHistory([]); // Clear chart history for the new flight session
-      
+
       const droneRes = await apiFetch('/api/drones');
       setDrones(await droneRes.json());
 
@@ -385,18 +390,7 @@ export default function App() {
     }
   };
 
-  const handleResolveAlert = async (alertId: string) => {
-    try {
-      const response = await apiFetch(`/api/analytics/alerts/${alertId}/resolve`, {
-        method: 'PUT',
-      });
-      if (response.ok) {
-        setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, resolved: true } : a)));
-      }
-    } catch (err) {
-      console.error('Resolve alert error:', err);
-    }
-  };
+
 
   const handleCreateDrone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -438,6 +432,12 @@ export default function App() {
 
   const selectedDrone = drones.find((d) => d.id === selectedDroneId);
 
+  const ITEMS_PER_PAGE = 5;
+  const totalLogsPages = Math.ceil(sessions.length / ITEMS_PER_PAGE) || 1;
+  const currentLogsPage = Math.min(logsPage, totalLogsPages);
+  const logsStartIndex = (currentLogsPage - 1) * ITEMS_PER_PAGE;
+  const paginatedSessions = sessions.slice(logsStartIndex, logsStartIndex + ITEMS_PER_PAGE);
+
   return (
     <div className="min-h-screen bg-slate-950 flex text-slate-100 font-sans">
 
@@ -478,8 +478,8 @@ export default function App() {
                 setInspectedSession(null);
               }}
               className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'monitor' && !inspectedSession
-                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                 }`}
             >
               <LayoutDashboard className="h-5 w-5" />
@@ -492,12 +492,12 @@ export default function App() {
                 setInspectedSession(null);
               }}
               className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'fleet'
-                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                 }`}
             >
               <Plane className="h-5 w-5" />
-              <span>Drone Fleet</span>
+              <span>My Drones</span>
             </button>
 
             <button
@@ -506,8 +506,8 @@ export default function App() {
                 setInspectedSession(null);
               }}
               className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'logs' || inspectedSession
-                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                 }`}
             >
               <History className="h-5 w-5" />
@@ -520,8 +520,8 @@ export default function App() {
                 setInspectedSession(null);
               }}
               className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'alerts'
-                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                 }`}
             >
               <div className="relative">
@@ -530,7 +530,7 @@ export default function App() {
                   <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-ping"></span>
                 )}
               </div>
-              <span>Fleet Warnings</span>
+              <span>Safety Alerts</span>
             </button>
           </nav>
         </div>
@@ -623,12 +623,12 @@ export default function App() {
                   </div>
 
                   {selectedDrone && (
-                    <div className="flex space-x-2">
+                    <div className="flex space-x-2 shrink-0 ml-4">
                       <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${selectedDrone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
-                          selectedDrone.status === 'FLYING' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                            selectedDrone.status === 'RETURNING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                              selectedDrone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                        selectedDrone.status === 'FLYING' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                          selectedDrone.status === 'RETURNING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                            selectedDrone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                              'bg-sky-500/10 text-sky-400 border border-sky-500/20'
                         }`}>
                         STATUS: {selectedDrone.status}
                       </span>
@@ -662,7 +662,7 @@ export default function App() {
                             <p className="text-xs text-slate-400 leading-relaxed">
                               To define a session route, <strong>click directly on the interactive map above</strong> to drop sequential waypoint pins (Pin #1, Pin #2, etc.). Once placed, configure target parameters inside the checklist before dispatching.
                             </p>
-                            
+
                             {/* Safety limits parameters */}
                             <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 space-y-2">
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Takeoff Safety Thresholds:</p>
@@ -707,7 +707,7 @@ export default function App() {
                               </div>
                             )}
                             <p className="text-xs font-semibold text-slate-400">Waypoint Checklist & Direct Settings:</p>
-                            
+
                             <div className="flex flex-col space-y-2 max-h-60 overflow-y-auto pr-1">
                               {waypoints.map((wp, idx) => (
                                 <div key={idx} className="bg-slate-900 border border-slate-800 text-xs px-3.5 py-2.5 rounded-xl flex items-center justify-between space-x-4">
@@ -717,7 +717,7 @@ export default function App() {
                                       ({wp.latitude.toFixed(5)}, {wp.longitude.toFixed(5)})
                                     </span>
                                   </div>
-                                  
+
                                   <div className="flex items-center space-x-3 shrink-0">
                                     {/* Altitude Setting */}
                                     <div className="flex items-center space-x-1">
@@ -773,7 +773,7 @@ export default function App() {
                               >
                                 Clear Route Checklist
                               </button>
-                              
+
                               <button
                                 disabled={!selectedDrone.isOnline}
                                 onClick={handleDispatch}
@@ -797,19 +797,19 @@ export default function App() {
                             onClick={() => handleOverride('RETURN_TO_BASE')}
                             className="py-3 px-4 bg-amber-600 hover:bg-amber-500 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-amber-600/15"
                           >
-                            Return to Base (RTL)
+                            Return to Base
                           </button>
                           <button
                             onClick={() => handleOverride('LAND')}
                             className="py-3 px-4 bg-sky-600 hover:bg-sky-500 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-sky-600/15"
                           >
-                            Initiate Land Sequence
+                            Land in Place
                           </button>
                           <button
                             onClick={() => handleOverride('EMERGENCY_LAND')}
                             className="py-3 px-4 bg-red-600 hover:bg-red-500 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-red-600/15 animate-pulse"
                           >
-                            Kill Power / Emergency Land
+                            Emergency Land
                           </button>
                         </div>
                       </div>
@@ -985,10 +985,10 @@ export default function App() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-indigo-400">{drone.serialNumber}</td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${drone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
-                              drone.status === 'FLYING' ? 'bg-emerald-500/15 text-emerald-400' :
-                                drone.status === 'RETURNING' ? 'bg-amber-500/15 text-amber-400' :
-                                  drone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400' :
-                                    'bg-sky-500/15 text-sky-400'
+                            drone.status === 'FLYING' ? 'bg-emerald-500/15 text-emerald-400' :
+                              drone.status === 'RETURNING' ? 'bg-amber-500/15 text-amber-400' :
+                                drone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400' :
+                                  'bg-sky-500/15 text-sky-400'
                             }`}>
                             {drone.status}
                           </span>
@@ -1031,49 +1031,79 @@ export default function App() {
             <div className="flex-1 flex flex-col space-y-6">
 
               {!inspectedSession ? (
-                <div className="bg-slate-900/25 border border-slate-900 rounded-2xl overflow-hidden backdrop-blur">
-                  <table className="min-w-full divide-y divide-slate-900">
-                    <thead className="bg-slate-900/35">
-                      <tr>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Drone</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Pilot</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Start Time</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Distance</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Avg Speed</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Battery Used</th>
-                        <th className="px-6 py-4 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">Inspect Flight</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-900">
-                      {sessions.map((session) => (
-                        <tr key={session.id} className="hover:bg-slate-900/10 transition-colors">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold">{session.drone?.name || 'Unknown'}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{session.pilot?.name || 'Auto-Dispatch'}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                            {new Date(session.startTime).toLocaleString()}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${session.status === 'COMPLETED' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-indigo-500/15 text-indigo-400'
-                              }`}>
-                              {session.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold">{session.distanceTraveled} km</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{session.avgSpeed} m/s</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{session.batteryConsumed}%</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-center">
-                            <button
-                              onClick={() => handleInspectSession(session)}
-                              className="text-indigo-400 hover:text-indigo-300 font-semibold text-xs tracking-wide cursor-pointer hover:underline"
-                            >
-                              Review track path
-                            </button>
-                          </td>
+                <div className="bg-slate-900/25 border border-slate-900 rounded-2xl flex flex-col overflow-hidden backdrop-blur">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-900">
+                      <thead className="bg-slate-900/35">
+                        <tr>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Drone</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Pilot</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Start Time</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Distance</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Avg Speed</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Battery Used</th>
+                          <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Inspect Flight</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-900">
+                        {paginatedSessions.map((session) => (
+                          <tr key={session.id} className="hover:bg-slate-900/10 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold">{session.drone?.name || 'Unknown'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{session.pilot?.name || 'Auto-Dispatch'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                              {new Date(session.startTime).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${session.status === 'COMPLETED' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-indigo-500/15 text-indigo-400'
+                                }`}>
+                                {session.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold">{session.distanceTraveled} km</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{session.avgSpeed} m/s</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{session.batteryConsumed}%</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right">
+                              <button
+                                onClick={() => handleInspectSession(session)}
+                                className="text-indigo-400 hover:text-indigo-300 font-semibold text-xs tracking-wide cursor-pointer hover:underline"
+                              >
+                                Review track path
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination Control Bar */}
+                  <div className="flex items-center justify-between px-6 py-4 bg-slate-900/35 border-t border-slate-900 rounded-b-2xl">
+                    <div className="text-xs text-slate-400">
+                      Showing <span className="font-semibold text-slate-200">{sessions.length === 0 ? 0 : logsStartIndex + 1}</span> to{' '}
+                      <span className="font-semibold text-slate-200">{Math.min(logsStartIndex + ITEMS_PER_PAGE, sessions.length)}</span> of{' '}
+                      <span className="font-semibold text-slate-200">{sessions.length}</span> flights
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
+                        disabled={currentLogsPage === 1}
+                        className="py-1 px-3 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium transition-all cursor-pointer"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-xs text-slate-400 px-2">
+                        Page <span className="font-semibold text-slate-200">{currentLogsPage}</span> of <span className="font-semibold text-slate-200">{totalLogsPages}</span>
+                      </span>
+                      <button
+                        onClick={() => setLogsPage((p) => Math.min(totalLogsPages, p + 1))}
+                        disabled={currentLogsPage === totalLogsPages}
+                        className="py-1 px-3 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium transition-all cursor-pointer"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 // Detailed inspector panel for a single flight session
@@ -1151,7 +1181,7 @@ export default function App() {
 
           {/* TAB 4: SYSTEM ALERTS */}
           {activeTab === 'alerts' && (
-            <div className="bg-slate-900/25 border border-slate-900 rounded-2xl overflow-hidden backdrop-blur flex-1">
+            <div className="bg-slate-900/25 border border-slate-900 rounded-2xl overflow-x-auto backdrop-blur flex-1">
               <table className="min-w-full divide-y divide-slate-900">
                 <thead className="bg-slate-900/35">
                   <tr>
@@ -1161,7 +1191,6 @@ export default function App() {
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Message</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Time Detected</th>
                     <th className="px-6 py-4 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
@@ -1184,21 +1213,6 @@ export default function App() {
                           }`}>
                           {alert.resolved ? 'RESOLVED' : 'ACTIVE'}
                         </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        {!alert.resolved ? (
-                          <button
-                            onClick={() => handleResolveAlert(alert.id)}
-                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1 px-3 rounded-lg transition-all cursor-pointer"
-                          >
-                            Mark Resolved
-                          </button>
-                        ) : (
-                          <div className="flex items-center justify-center text-emerald-400 space-x-1 text-xs">
-                            <CheckCircle className="h-4 w-4" />
-                            <span>System OK</span>
-                          </div>
-                        )}
                       </td>
                     </tr>
                   ))}
