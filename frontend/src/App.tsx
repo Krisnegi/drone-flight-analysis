@@ -556,7 +556,7 @@ export default function App() {
             <div className="bg-slate-900/30 border border-slate-900 p-4 rounded-2xl flex items-center space-x-4">
               <Plane className="h-10 w-10 text-indigo-400 bg-indigo-500/10 p-2 rounded-xl" />
               <div>
-                <p className="text-xs font-semibold text-slate-400">Total Aircraft</p>
+                <p className="text-xs font-semibold text-slate-400">Total Drones</p>
                 <p className="text-xl font-bold">{stats.totalDrones}</p>
               </div>
             </div>
@@ -608,7 +608,7 @@ export default function App() {
                 <div className="flex items-center justify-between bg-slate-900/25 border border-slate-900 p-4 rounded-2xl backdrop-blur">
                   <div className="flex items-center space-x-3">
                     <Plane className="h-6 w-6 text-indigo-400" />
-                    <span className="font-semibold text-sm">Select Drone feed:</span>
+                    <span className="font-semibold text-sm">Select Drone:</span>
                     <select
                       value={selectedDroneId || ''}
                       onChange={(e) => setSelectedDroneId(e.target.value || null)}
@@ -924,7 +924,7 @@ export default function App() {
               {/* Register drone form (Admin only) */}
               {user.role === 'ADMIN' && (
                 <div className="bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur">
-                  <h3 className="text-base font-semibold mb-4">Register New Aircraft Hardware</h3>
+                  <h3 className="text-base font-semibold mb-4">Register New Drone</h3>
                   <form onSubmit={handleCreateDrone} className="grid grid-cols-4 gap-4">
                     <input
                       type="text"
@@ -1142,7 +1142,7 @@ export default function App() {
 
                     <div className="space-y-4">
                       <div className="bg-slate-950 p-4 rounded-xl border border-slate-900">
-                        <p className="text-[10px] text-slate-400 uppercase font-semibold">Aircraft Details</p>
+                        <p className="text-[10px] text-slate-400 uppercase font-semibold">Drone Details</p>
                         <p className="text-sm font-semibold">{inspectedSession.drone?.name}</p>
                         <p className="text-xs text-slate-500">Model: {inspectedSession.drone?.model}</p>
                       </div>
