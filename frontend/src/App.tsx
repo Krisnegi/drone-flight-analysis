@@ -31,6 +31,23 @@ import type {
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 
 const BASE_URL = 'http://localhost:4000';
+const BASE_LAT = 12.971598;
+const BASE_LNG = 77.594562;
+
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371e3; // Earth radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('drone_token'));
@@ -46,7 +63,7 @@ export default function App() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [sessions, setSessions] = useState<FlightSession[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  
+
   // Selection and Interactive States
   const [selectedDroneId, setSelectedDroneId] = useState<string | null>(null);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
@@ -58,11 +75,9 @@ export default function App() {
   const [newDroneName, setNewDroneName] = useState('');
   const [newDroneSN, setNewDroneSN] = useState('');
   const [newDroneModel, setNewDroneModel] = useState('');
-  const [targetAlt, setTargetAlt] = useState(15);
-  const [targetSpeed, setTargetSpeed] = useState(5);
-
   // WebSocket reference
   const socketRef = useRef<Socket | null>(null);
+  const lastSeenRef = useRef<Record<string, number>>({});
 
   // Fetch helper wrapper with token header
   const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
@@ -106,6 +121,12 @@ export default function App() {
         if (droneData.length > 0 && !selectedDroneId) {
           setSelectedDroneId(droneData[0].id);
         }
+        // Initialize last seen timestamps for currently online drones
+        droneData.forEach((d: Drone) => {
+          if (d.isOnline) {
+            lastSeenRef.current[d.id] = Date.now();
+          }
+        });
 
         const statsRes = await apiFetch('/api/analytics/dashboard');
         setStats(await statsRes.json());
@@ -121,9 +142,6 @@ export default function App() {
     };
 
     loadData();
-    const interval = setInterval(loadData, 8000); // Poll dashboard data every 8 seconds
-
-    return () => clearInterval(interval);
   }, [token, activeTab]);
 
   // 2. Establish WebSockets pipeline
@@ -135,9 +153,27 @@ export default function App() {
 
     // Bind real-time telemetry updates
     socketRef.current.on('telemetry', (payload) => {
+      // Record last seen heartbeat
+      lastSeenRef.current[payload.droneId] = Date.now();
+
       // Update drone coordinates in state list
-      setDrones((prevDrones) =>
-        prevDrones.map((d) =>
+      setDrones((prevDrones) => {
+        const existingDrone = prevDrones.find((d) => d.id === payload.droneId);
+        
+        // If a drone completes landing (transitions back to IDLE), refresh historical sessions and stats
+        if (existingDrone && existingDrone.status !== 'IDLE' && payload.status === 'IDLE') {
+          apiFetch('/api/sessions')
+            .then((res) => res.json())
+            .then((data) => setSessions(data))
+            .catch((err) => console.error('Error refreshing sessions:', err));
+            
+          apiFetch('/api/analytics/dashboard')
+            .then((res) => res.json())
+            .then((data) => setStats(data))
+            .catch((err) => console.error('Error refreshing stats:', err));
+        }
+
+        return prevDrones.map((d) =>
           d.id === payload.droneId
             ? {
                 ...d,
@@ -146,10 +182,11 @@ export default function App() {
                 currentLatitude: payload.latitude,
                 currentLongitude: payload.longitude,
                 currentAltitude: payload.altitude,
+                isOnline: true,
               }
             : d
-        )
-      );
+        );
+      });
 
       // Append selected drone telemetry to active charts history
       if (payload.droneId === selectedDroneId && payload.status !== 'IDLE') {
@@ -186,6 +223,36 @@ export default function App() {
     };
   }, [token, selectedDroneId]);
 
+  // 3. Heartbeat watchdog checker to mark drones offline if telemetry stops broadcasting
+  useEffect(() => {
+    if (!token) return;
+
+    const checkOfflineDrones = () => {
+      const now = Date.now();
+      setDrones((prevDrones) => {
+        let changed = false;
+        const nextDrones = prevDrones.map((d) => {
+          const lastSeen = lastSeenRef.current[d.id];
+          // Transition from Online to Offline if we haven't received telemetry in 5 seconds
+          if (d.isOnline && (!lastSeen || now - lastSeen > 5000)) {
+            changed = true;
+            return { ...d, isOnline: false };
+          }
+          // Transition from Offline to Online if we received telemetry recently
+          if (!d.isOnline && lastSeen && now - lastSeen < 5000) {
+            changed = true;
+            return { ...d, isOnline: true };
+          }
+          return d;
+        });
+        return changed ? nextDrones : prevDrones;
+      });
+    };
+
+    const interval = setInterval(checkOfflineDrones, 2500); // Check statuses every 2.5 seconds
+    return () => clearInterval(interval);
+  }, [token]);
+
   // Clear live history when switching selected drones
   useEffect(() => {
     setLiveHistory([]);
@@ -207,24 +274,64 @@ export default function App() {
   // Handle map clicking to build mission waypoints
   const handleMapClick = (lat: number, lng: number) => {
     if (activeTab !== 'monitor') return;
-    
-    // Create new waypoint coordinates
+
+    // Check geofence boundary (300 meters)
+    const distance = getDistanceMeters(BASE_LAT, BASE_LNG, lat, lng);
+    if (distance > 300) {
+      alert(`⚠️ Cannot add waypoint: Click coordinates are ${Math.round(distance)}m away from base station. Geofence safety limit is 300m.`);
+      return;
+    }
+
+    // Create new waypoint coordinates with default values (15m altitude, 5m/s speed)
     const newWaypoint: Waypoint = {
       latitude: lat,
       longitude: lng,
-      altitude: targetAlt,
-      speed: targetSpeed,
+      altitude: 15,
+      speed: 5,
     };
     setWaypoints((prev) => [...prev, newWaypoint]);
+  };
+
+  const handleUpdateWaypoint = (index: number, field: 'altitude' | 'speed', rawValue: string) => {
+    if (rawValue === '') {
+      setWaypoints((prev) =>
+        prev.map((wp, idx) => (idx === index ? { ...wp, [field]: '' } : wp))
+      );
+      return;
+    }
+
+    const parsed = Number(rawValue);
+    let validatedValue = isNaN(parsed) ? 0 : Math.max(0, parsed);
+
+    // Enforce safety caps matching background alerts limits
+    if (field === 'altitude') {
+      validatedValue = Math.min(50, validatedValue); // Limit to 50m max altitude
+    } else if (field === 'speed') {
+      validatedValue = Math.min(12, validatedValue); // Limit to 12m/s max speed
+    }
+
+    setWaypoints((prev) =>
+      prev.map((wp, idx) => (idx === index ? { ...wp, [field]: validatedValue } : wp))
+    );
+  };
+
+  const handleDeleteWaypoint = (index: number) => {
+    setWaypoints((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   // REST API Actions
   const handleDispatch = async () => {
     if (!selectedDroneId || waypoints.length === 0) return;
     try {
+      const formattedWaypoints = waypoints.map((wp) => ({
+        ...wp,
+        altitude: Number(wp.altitude) || 0,
+        speed: Number(wp.speed) || 0,
+      }));
+
       const response = await apiFetch(`/api/sessions/drones/${selectedDroneId}/dispatch`, {
         method: 'POST',
-        body: JSON.stringify({ waypoints }),
+        body: JSON.stringify({ waypoints: formattedWaypoints }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
@@ -312,7 +419,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex text-slate-100 font-sans">
-      
+
       {/* Sidebar Navigation */}
       <aside className="w-64 border-r border-slate-900 bg-slate-900/35 backdrop-blur flex flex-col justify-between shrink-0">
         <div>
@@ -333,10 +440,10 @@ export default function App() {
                 {user.role === 'ADMIN' ? (
                   <>
                     <Shield className="h-3 w-3 text-indigo-400 shrink-0" />
-                    <span>Clearance: Admin</span>
+                    <span>Role: Admin</span>
                   </>
                 ) : (
-                  <span>Clearance: Pilot</span>
+                  <span>Role: Pilot</span>
                 )}
               </div>
             </div>
@@ -349,11 +456,10 @@ export default function App() {
                 setActiveTab('monitor');
                 setInspectedSession(null);
               }}
-              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${
-                activeTab === 'monitor' && !inspectedSession
+              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'monitor' && !inspectedSession
                   ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
                   : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-              }`}
+                }`}
             >
               <LayoutDashboard className="h-5 w-5" />
               <span>Real-Time Monitor</span>
@@ -364,11 +470,10 @@ export default function App() {
                 setActiveTab('fleet');
                 setInspectedSession(null);
               }}
-              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${
-                activeTab === 'fleet'
+              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'fleet'
                   ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
                   : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-              }`}
+                }`}
             >
               <Plane className="h-5 w-5" />
               <span>Drone Fleet</span>
@@ -379,11 +484,10 @@ export default function App() {
                 setActiveTab('logs');
                 setInspectedSession(null);
               }}
-              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${
-                activeTab === 'logs' || inspectedSession
+              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'logs' || inspectedSession
                   ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
                   : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-              }`}
+                }`}
             >
               <History className="h-5 w-5" />
               <span>Flight History Logs</span>
@@ -394,11 +498,10 @@ export default function App() {
                 setActiveTab('alerts');
                 setInspectedSession(null);
               }}
-              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${
-                activeTab === 'alerts'
+              className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'alerts'
                   ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
                   : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-              }`}
+                }`}
             >
               <div className="relative">
                 <AlertTriangle className="h-5 w-5" />
@@ -425,7 +528,7 @@ export default function App() {
 
       {/* Main Panel Content Area */}
       <main className="flex-1 flex flex-col min-h-screen bg-slate-950/65 overflow-y-auto">
-        
+
         {/* Top Header stats aggregations */}
         {stats && (
           <header className="grid grid-cols-5 gap-4 px-8 py-6 border-b border-slate-900 bg-slate-900/10 backdrop-blur shrink-0">
@@ -440,7 +543,7 @@ export default function App() {
             <div className="bg-slate-900/30 border border-slate-900 p-4 rounded-2xl flex items-center space-x-4">
               <Activity className="h-10 w-10 text-emerald-400 bg-emerald-500/10 p-2 rounded-xl" />
               <div>
-                <p className="text-xs font-semibold text-slate-400">Active Missions</p>
+                <p className="text-xs font-semibold text-slate-400">Active Sessions</p>
                 <p className="text-xl font-bold">{stats.activeDrones}</p>
               </div>
             </div>
@@ -472,14 +575,14 @@ export default function App() {
         )}
 
         <div className="flex-1 p-8 flex flex-col">
-          
+
           {/* TAB 1: REAL-TIME MONITOR */}
           {activeTab === 'monitor' && !inspectedSession && (
             <div className="flex-1 grid grid-cols-12 gap-8">
-              
+
               {/* Left Column: Map & Controls */}
               <div className="col-span-8 flex flex-col space-y-6">
-                
+
                 {/* Select Drone Panel */}
                 <div className="flex items-center justify-between bg-slate-900/25 border border-slate-900 p-4 rounded-2xl backdrop-blur">
                   <div className="flex items-center space-x-3">
@@ -492,7 +595,7 @@ export default function App() {
                     >
                       {drones.map((d) => (
                         <option key={d.id} value={d.id}>
-                          {d.name} ({d.model})
+                          {d.name} ({d.model}) {d.isOnline ? '[Online]' : '[Offline]'}
                         </option>
                       ))}
                     </select>
@@ -500,13 +603,12 @@ export default function App() {
 
                   {selectedDrone && (
                     <div className="flex space-x-2">
-                      <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
-                        selectedDrone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
-                        selectedDrone.status === 'FLYING' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        selectedDrone.status === 'RETURNING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                        selectedDrone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                        'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-                      }`}>
+                      <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${selectedDrone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
+                          selectedDrone.status === 'FLYING' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                            selectedDrone.status === 'RETURNING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              selectedDrone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                        }`}>
                         STATUS: {selectedDrone.status}
                       </span>
                     </div>
@@ -514,7 +616,7 @@ export default function App() {
                 </div>
 
                 {/* Map Display Panel */}
-                <div className="flex-1 h-[450px] relative">
+                <div className="h-[450px] shrink-0 relative">
                   <MapPanel
                     drones={drones}
                     selectedDroneId={selectedDroneId}
@@ -526,60 +628,140 @@ export default function App() {
                 {/* Mission Waypoints Designer & Controls */}
                 {selectedDrone && (
                   <div className="bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur space-y-4">
-                    <h3 className="text-base font-semibold">Mission Design & Command Center</h3>
-                    
+                    <h3 className="text-base font-semibold">Session Design & Command Center</h3>
+
                     {selectedDrone.status === 'IDLE' ? (
                       <div className="space-y-4">
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-400">Target Altitude (m)</label>
-                            <input
-                              type="number"
-                              value={targetAlt}
-                              onChange={(e) => setTargetAlt(Number(e.target.value))}
-                              className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-400">Target Speed (m/s)</label>
-                            <input
-                              type="number"
-                              value={targetSpeed}
-                              onChange={(e) => setTargetSpeed(Number(e.target.value))}
-                              className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
-                            />
-                          </div>
-                          <div className="flex items-end">
-                            <button
-                              disabled={waypoints.length === 0}
-                              onClick={handleDispatch}
-                              className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-semibold rounded-lg text-xs transition-all cursor-pointer shadow-lg shadow-indigo-600/15"
-                            >
-                              <Navigation className="h-4 w-4" />
-                              <span>Dispatch Mission</span>
-                            </button>
-                          </div>
-                        </div>
+                        {waypoints.length === 0 ? (
+                          <div className="p-6 bg-indigo-950/15 border border-indigo-900/30 rounded-2xl flex flex-col space-y-3 text-left">
+                            <div className="flex items-center space-x-2 text-indigo-400">
+                              <Navigation className="h-5 w-5 animate-pulse" />
+                              <span className="font-bold text-xs uppercase tracking-wider text-left">Flight Session Map Planner</span>
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              To define a session route, <strong>click directly on the interactive map above</strong> to drop sequential waypoint pins (Pin #1, Pin #2, etc.). Once placed, configure target parameters inside the checklist before dispatching.
+                            </p>
+                            
+                            {/* Safety limits parameters */}
+                            <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 space-y-2">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Takeoff Safety Thresholds:</p>
+                              <div className="grid grid-cols-3 gap-4 text-[11px]">
+                                <div>
+                                  <p className="text-slate-500">Max Geofence</p>
+                                  <p className="font-semibold text-indigo-300">300 meters</p>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Max Altitude</p>
+                                  <p className="font-semibold text-indigo-300">50 meters</p>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Max Speed</p>
+                                  <p className="font-semibold text-indigo-300">12 m/s</p>
+                                </div>
+                              </div>
+                            </div>
 
-                        {/* List drawn waypoints */}
-                        {waypoints.length > 0 && (
-                          <div className="bg-slate-950/80 border border-slate-900 rounded-xl p-4">
-                            <p className="text-xs font-semibold text-slate-400 mb-2">Waypoint Checklist:</p>
-                            <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                            {!selectedDrone.isOnline ? (
+                              <div className="bg-red-500/15 border border-red-500/30 rounded-xl p-3 flex items-start space-x-2.5 text-[11px] text-red-200 leading-normal text-left">
+                                <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                                <div>
+                                  <span className="font-bold">Drone is offline:</span> Please check the power state and hardware signal of the drone to enable map navigation routing.
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="pt-1 text-[10px] text-indigo-400/90 font-semibold uppercase tracking-widest flex items-center space-x-1.5">
+                                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping"></span>
+                                <span>Awaiting Map Clicks...</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="bg-slate-950/80 border border-slate-900 rounded-xl p-4 flex flex-col space-y-4">
+                            {!selectedDrone.isOnline && (
+                              <div className="bg-red-500/15 border border-red-500/30 rounded-xl p-3 flex items-start space-x-2.5 text-[11px] text-red-200 leading-normal text-left">
+                                <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                                <div>
+                                  <span className="font-bold">Drone is offline:</span> Please verify connection to allow waypoint dispatching.
+                                </div>
+                              </div>
+                            )}
+                            <p className="text-xs font-semibold text-slate-400">Waypoint Checklist & Direct Settings:</p>
+                            
+                            <div className="flex flex-col space-y-2 max-h-60 overflow-y-auto pr-1">
                               {waypoints.map((wp, idx) => (
-                                <div key={idx} className="bg-slate-900 border border-slate-800 text-[10px] px-2.5 py-1.5 rounded-lg flex items-center space-x-2">
-                                  <span className="font-bold text-indigo-400">#{idx + 1}</span>
-                                  <span>({wp.latitude.toFixed(5)}, {wp.longitude.toFixed(5)})</span>
-                                  <span className="text-slate-400">{wp.altitude}m @ {wp.speed}m/s</span>
+                                <div key={idx} className="bg-slate-900 border border-slate-800 text-xs px-3.5 py-2.5 rounded-xl flex items-center justify-between space-x-4">
+                                  <div className="flex items-center space-x-3 overflow-hidden">
+                                    <span className="font-bold text-indigo-400 shrink-0">#{idx + 1}</span>
+                                    <span className="font-mono text-slate-400 text-[11px] truncate">
+                                      ({wp.latitude.toFixed(5)}, {wp.longitude.toFixed(5)})
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="flex items-center space-x-3 shrink-0">
+                                    {/* Altitude Setting */}
+                                    <div className="flex items-center space-x-1">
+                                      <span className="text-[10px] text-slate-500 font-medium">Altitude:</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="50"
+                                        onKeyDown={(e) => {
+                                          if (e.key === '-' || e.key === 'e') e.preventDefault();
+                                        }}
+                                        value={wp.altitude}
+                                        onChange={(e) => handleUpdateWaypoint(idx, 'altitude', e.target.value)}
+                                        className="w-12 px-1.5 py-0.5 bg-slate-950 border border-slate-800 rounded text-slate-100 text-xs text-center focus:ring-1 focus:ring-indigo-500 outline-none"
+                                      />
+                                      <span className="text-[10px] text-slate-500">m</span>
+                                    </div>
+
+                                    {/* Speed Setting */}
+                                    <div className="flex items-center space-x-1">
+                                      <span className="text-[10px] text-slate-500 font-medium">Speed:</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="12"
+                                        onKeyDown={(e) => {
+                                          if (e.key === '-' || e.key === 'e') e.preventDefault();
+                                        }}
+                                        value={wp.speed}
+                                        onChange={(e) => handleUpdateWaypoint(idx, 'speed', e.target.value)}
+                                        className="w-12 px-1.5 py-0.5 bg-slate-950 border border-slate-800 rounded text-slate-100 text-xs text-center focus:ring-1 focus:ring-indigo-500 outline-none"
+                                      />
+                                      <span className="text-[10px] text-slate-500">m/s</span>
+                                    </div>
+
+                                    {/* Delete Button */}
+                                    <button
+                                      onClick={() => handleDeleteWaypoint(idx)}
+                                      className="text-red-400 hover:text-red-300 p-1 rounded-lg hover:bg-red-500/10 transition-all cursor-pointer"
+                                      title="Delete Waypoint"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
-                            <button
-                              onClick={() => setWaypoints([])}
-                              className="mt-3 text-[10px] text-red-400 hover:text-red-300 font-semibold uppercase tracking-wider"
-                            >
-                              Clear Route Checklist
-                            </button>
+
+                            <div className="flex items-center justify-between border-t border-slate-900 pt-3">
+                              <button
+                                onClick={() => setWaypoints([])}
+                                className="text-[10px] text-red-400 hover:text-red-300 font-semibold uppercase tracking-wider cursor-pointer"
+                              >
+                                Clear Route Checklist
+                              </button>
+                              
+                              <button
+                                disabled={!selectedDrone.isOnline}
+                                onClick={handleDispatch}
+                                className="flex items-center space-x-1.5 py-2 px-5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-indigo-600/15"
+                              >
+                                <Navigation className="h-4 w-4" />
+                                <span>{selectedDrone.isOnline ? 'Dispatch Session' : 'Drone Offline'}</span>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -617,7 +799,7 @@ export default function App() {
 
               {/* Right Column: Live Status & Charts */}
               <div className="col-span-4 flex flex-col space-y-6">
-                
+
                 {/* Live parameters cards */}
                 {selectedDrone && (
                   <div className="grid grid-cols-2 gap-4 shrink-0">
@@ -640,7 +822,7 @@ export default function App() {
                     <div className="bg-slate-900/25 border border-slate-900 p-4 rounded-2xl flex items-center space-x-3">
                       <Radio className="h-6 w-6 text-sky-400 shrink-0" />
                       <div className="overflow-hidden">
-                        <p className="text-[10px] font-semibold text-slate-400 uppercase">Control Link</p>
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase">Signal Strength</p>
                         <p className="text-sm font-bold truncate">
                           {liveHistory.length > 0 ? `${liveHistory[liveHistory.length - 1].signalStrength} dBm` : '-30 dBm'}
                         </p>
@@ -666,8 +848,8 @@ export default function App() {
                           <AreaChart data={liveHistory}>
                             <defs>
                               <linearGradient id="colorAlt" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4}/>
-                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
+                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <XAxis dataKey="time" hide />
@@ -692,8 +874,8 @@ export default function App() {
                           <AreaChart data={liveHistory}>
                             <defs>
                               <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
-                                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <XAxis dataKey="time" hide />
@@ -717,7 +899,7 @@ export default function App() {
           {/* TAB 2: DRONE FLEET */}
           {activeTab === 'fleet' && (
             <div className="space-y-6">
-              
+
               {/* Register drone form (Admin only) */}
               {user.role === 'ADMIN' && (
                 <div className="bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur">
@@ -781,13 +963,12 @@ export default function App() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{drone.model}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-indigo-400">{drone.serialNumber}</td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${
-                            drone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
-                            drone.status === 'FLYING' ? 'bg-emerald-500/15 text-emerald-400' :
-                            drone.status === 'RETURNING' ? 'bg-amber-500/15 text-amber-400' :
-                            drone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400' :
-                            'bg-sky-500/15 text-sky-400'
-                          }`}>
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${drone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
+                              drone.status === 'FLYING' ? 'bg-emerald-500/15 text-emerald-400' :
+                                drone.status === 'RETURNING' ? 'bg-amber-500/15 text-amber-400' :
+                                  drone.status === 'EMERGENCY' ? 'bg-red-500/20 text-red-400' :
+                                    'bg-sky-500/15 text-sky-400'
+                            }`}>
                             {drone.status}
                           </span>
                         </td>
@@ -827,7 +1008,7 @@ export default function App() {
           {/* TAB 3: FLIGHT LOGS (SESSION HISTORY) */}
           {(activeTab === 'logs' || inspectedSession) && (
             <div className="flex-1 flex flex-col space-y-6">
-              
+
               {!inspectedSession ? (
                 <div className="bg-slate-900/25 border border-slate-900 rounded-2xl overflow-hidden backdrop-blur">
                   <table className="min-w-full divide-y divide-slate-900">
@@ -852,9 +1033,8 @@ export default function App() {
                             {new Date(session.startTime).toLocaleString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
-                              session.status === 'COMPLETED' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-indigo-500/15 text-indigo-400'
-                            }`}>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${session.status === 'COMPLETED' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-indigo-500/15 text-indigo-400'
+                              }`}>
                               {session.status}
                             </span>
                           </td>
@@ -895,7 +1075,7 @@ export default function App() {
                     </div>
 
                     {/* Historical path playback map */}
-                    <div className="flex-1 min-h-[400px]">
+                    <div className="h-[450px] shrink-0">
                       <MapPanel
                         drones={[]}
                         selectedDroneId={null}
@@ -908,7 +1088,7 @@ export default function App() {
                   {/* Summary analytics cards */}
                   <div className="col-span-4 bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur flex flex-col space-y-6">
                     <h3 className="text-base font-semibold">Post-Flight Analytics Summary</h3>
-                    
+
                     <div className="space-y-4">
                       <div className="bg-slate-950 p-4 rounded-xl border border-slate-900">
                         <p className="text-[10px] text-slate-400 uppercase font-semibold">Aircraft Details</p>
@@ -969,9 +1149,8 @@ export default function App() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold">{alert.drone?.name || 'Unknown'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-red-400 font-bold">{alert.type}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
-                          alert.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-amber-500/15 text-amber-400'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${alert.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-amber-500/15 text-amber-400'
+                          }`}>
                           {alert.severity}
                         </span>
                       </td>
@@ -980,9 +1159,8 @@ export default function App() {
                         {new Date(alert.timestamp).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
-                          alert.resolved ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${alert.resolved ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                          }`}>
                           {alert.resolved ? 'RESOLVED' : 'ACTIVE'}
                         </span>
                       </td>

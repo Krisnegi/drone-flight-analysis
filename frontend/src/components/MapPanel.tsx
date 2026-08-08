@@ -5,26 +5,35 @@ import 'leaflet/dist/leaflet.css';
 import type { Drone, Waypoint, TelemetryLog } from '../types';
 
 // Drone Icon SVG Markup
-const droneSvg = (status: string) => {
+const droneSvg = (status: string, isSelected: boolean) => {
   let color = 'text-indigo-400';
   if (status === 'FLYING') color = 'text-emerald-400';
   if (status === 'RETURNING') color = 'text-amber-400';
   if (status === 'LANDING') color = 'text-sky-400';
   if (status === 'EMERGENCY') color = 'text-red-500 animate-bounce';
   
+  const ring = isSelected 
+    ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-slate-950 scale-110 shadow-[0_0_15px_rgba(99,102,241,0.6)]' 
+    : 'opacity-50 scale-90 filter grayscale-[25%]';
+
   return `
-    <div class="relative flex items-center justify-center">
-      <div class="absolute w-10 h-10 bg-slate-900/80 rounded-full border border-slate-700/50 shadow-lg -z-10"></div>
-      <svg class="w-7 h-7 ${color} fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 16h-2v-2h2v2zm0-4h-2V7h2v7z"/>
+    <div class="relative flex items-center justify-center transition-all duration-300 ${ring}">
+      <div class="absolute w-10 h-10 bg-slate-900/95 rounded-full border ${isSelected ? 'border-indigo-500' : 'border-slate-800'} shadow-lg -z-10"></div>
+      <svg class="w-7 h-7 ${color}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4l16 16M20 4L4 20" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+        <circle cx="4" cy="4" r="2" fill="currentColor"/>
+        <circle cx="20" cy="4" r="2" fill="currentColor"/>
+        <circle cx="4" cy="20" r="2" fill="currentColor"/>
+        <circle cx="20" cy="20" r="2" fill="currentColor"/>
+        <circle cx="12" cy="12" r="3.5" fill="#0f172a" stroke="currentColor" stroke-width="1.5"/>
       </svg>
     </div>
   `;
 };
 
-const createDroneIcon = (status: string) => {
+const createDroneIcon = (status: string, isSelected: boolean) => {
   return L.divIcon({
-    html: droneSvg(status),
+    html: droneSvg(status, isSelected),
     className: 'custom-drone-icon',
     iconSize: [40, 40],
     iconAnchor: [20, 20],
@@ -81,6 +90,40 @@ const MapFocusController: React.FC<{ lat: number; lng: number }> = ({ lat, lng }
   return null;
 };
 
+// Map recenter button utility
+const RecenterControl: React.FC = () => {
+  const map = useMap();
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      L.DomEvent.disableClickPropagation(containerRef.current);
+    }
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="leaflet-bottom leaflet-left z-[1000] mb-4 ml-4 pointer-events-auto"
+    >
+      <div className="leaflet-control">
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            map.setView([BASE_LAT, BASE_LNG], 18);
+          }}
+          className="bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-100 text-xs font-bold px-3.5 py-2.5 rounded-xl shadow-xl flex items-center space-x-1.5 cursor-pointer transition-all active:scale-95"
+          title="Recenter Map to Base Station"
+        >
+          <span>📡</span>
+          <span>Recenter Base</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const MapPanel: React.FC<MapPanelProps> = ({
   drones,
   selectedDroneId,
@@ -109,7 +152,7 @@ export const MapPanel: React.FC<MapPanelProps> = ({
     <div className="w-full h-full relative border border-slate-800/80 rounded-2xl overflow-hidden shadow-inner">
       <MapContainer
         center={[mapCenterLat, mapCenterLng]}
-        zoom={16}
+        zoom={18}
         scrollWheelZoom={true}
         className="w-full h-full"
       >
@@ -141,7 +184,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             <Marker
               key={drone.id}
               position={[drone.currentLatitude, drone.currentLongitude]}
-              icon={createDroneIcon(drone.status)}
+              icon={createDroneIcon(drone.status, drone.id === selectedDroneId)}
+              zIndexOffset={drone.id === selectedDroneId ? 1000 : 0}
             >
               <Popup>
                 <div className="text-xs font-sans text-slate-800">
@@ -190,6 +234,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
             pathOptions={{ color: '#10b981', weight: 4 }}
           />
         )}
+        {/* Recenter button overlay */}
+        <RecenterControl />
       </MapContainer>
 
       {/* Floating map hint overlay */}

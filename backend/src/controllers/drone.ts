@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../services/db';
 import { AuthenticatedRequest } from '../middleware/auth';
+import { redis } from '../services/redis';
 
 /**
  * Register a new drone in the database (Admin only)
@@ -45,7 +46,29 @@ export async function listDrones(req: AuthenticatedRequest, res: Response) {
     const drones = await prisma.drone.findMany({
       orderBy: { createdAt: 'desc' },
     });
-    return res.json(drones);
+
+    // Check if the drone is actively broadcasting simulator telemetry in the last 5 seconds
+    const dronesWithStatus = await Promise.all(
+      drones.map(async (drone) => {
+        const cacheState = await redis.get(`drone:${drone.id}:state`);
+        let isOnline = false;
+        if (cacheState) {
+          try {
+            const payload = JSON.parse(cacheState);
+            const lastUpdated = new Date(payload.timestamp).getTime();
+            isOnline = (Date.now() - lastUpdated) < 5000;
+          } catch (e) {
+            // ignore JSON parse errors
+          }
+        }
+        return {
+          ...drone,
+          isOnline,
+        };
+      })
+    );
+
+    return res.json(dronesWithStatus);
   } catch (error) {
     console.error('List drones error:', error);
     return res.status(500).json({ error: 'Internal server error while fetching drones list' });
@@ -73,7 +96,20 @@ export async function getDrone(req: AuthenticatedRequest, res: Response) {
       return res.status(404).json({ error: 'Drone not found' });
     }
 
-    return res.json(drone);
+    const cacheState = await redis.get(`drone:${drone.id}:state`);
+    let isOnline = false;
+    if (cacheState) {
+      try {
+        const payload = JSON.parse(cacheState);
+        const lastUpdated = new Date(payload.timestamp).getTime();
+        isOnline = (Date.now() - lastUpdated) < 5000;
+      } catch (e) {}
+    }
+
+    return res.json({
+      ...drone,
+      isOnline,
+    });
   } catch (error) {
     console.error('Get drone error:', error);
     return res.status(500).json({ error: 'Internal server error while fetching drone' });

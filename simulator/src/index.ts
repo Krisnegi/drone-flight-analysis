@@ -24,9 +24,9 @@ client.on('connect', () => {
   const baseLng = 77.594562;
 
   droneIds.forEach((id, index) => {
-    // Give each drone a small coordinate offset (approx. 30 meters) to represent distinct launch pads
-    const latOffset = index * 0.00035;
-    const lngOffset = index * 0.00035;
+    // Give each drone a small coordinate offset (approx. 7 meters) to represent adjacent launch pads
+    const latOffset = index * 0.00005;
+    const lngOffset = index * 0.00005;
     
     const drone = new SimulatedDrone(id, client, baseLat + latOffset, baseLng + lngOffset);
     drones.push(drone);

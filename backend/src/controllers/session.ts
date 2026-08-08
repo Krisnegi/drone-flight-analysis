@@ -22,6 +22,21 @@ export async function dispatchDrone(req: AuthenticatedRequest, res: Response) {
       return res.status(404).json({ error: 'Drone not found.' });
     }
 
+    // Verify drone is online in Redis cache (telemetry sent in last 5 seconds)
+    const cacheState = await redis.get(`drone:${droneId}:state`);
+    let isOnline = false;
+    if (cacheState) {
+      try {
+        const payload = JSON.parse(cacheState);
+        const lastUpdated = new Date(payload.timestamp).getTime();
+        isOnline = (Date.now() - lastUpdated) < 5000;
+      } catch (e) {}
+    }
+
+    if (!isOnline) {
+      return res.status(400).json({ error: 'Cannot dispatch drone. Drone is offline. Please start the simulator first.' });
+    }
+
     if (drone.status !== 'IDLE' && drone.status !== 'LANDED') {
       return res.status(400).json({ error: `Cannot dispatch drone. Current status is ${drone.status}. Drone must be IDLE.` });
     }

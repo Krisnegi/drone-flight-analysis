@@ -15,6 +15,7 @@ export interface Drone {
   currentLatitude: number | null;
   currentLongitude: number | null;
   currentAltitude: number | null;
+  isOnline?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -22,8 +23,8 @@ export interface Drone {
 export interface Waypoint {
   latitude: number;
   longitude: number;
-  altitude: number;
-  speed: number;
+  altitude: number | '';
+  speed: number | '';
 }
 
 export interface FlightSession {
