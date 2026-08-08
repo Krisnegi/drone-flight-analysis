@@ -98,7 +98,11 @@ export class SimulatedDrone {
     this.waypoints = waypoints;
     this.currentWaypointIndex = 0;
     this.status = 'TAKING_OFF';
+    this.altitude = 0.0;
+    this.speed = 0.0;
     console.log(`[Drone ${this.droneId}] Starting mission: ${flightSessionId}. Taking off...`);
+    // Publish initial 0m state immediately
+    this.publishTelemetry();
   }
 
   private returnToBase() {
@@ -137,7 +141,7 @@ export class SimulatedDrone {
 
       case 'TAKING_OFF': {
         const targetAlt = this.waypoints.length > 0 ? this.waypoints[0].altitude : 15.0;
-        const climbRate = 2.0; // 2 meters per second ascent
+        const climbRate = 5.0; // 5 meters per second ascent
 
         if (this.altitude < targetAlt) {
           this.altitude = Math.min(targetAlt, this.altitude + climbRate);
@@ -171,7 +175,7 @@ export class SimulatedDrone {
         }
 
         // Adjust altitude towards target waypoint altitude
-        const vertRate = 1.5; // m/s vertical speed
+        const vertRate = 3.0; // 3 m/s vertical speed
         if (this.altitude < target.altitude) {
           this.altitude = Math.min(target.altitude, this.altitude + vertRate);
         } else if (this.altitude > target.altitude) {
@@ -179,27 +183,27 @@ export class SimulatedDrone {
         }
 
         // Move position towards target coordinates based on current speed
-        if (dist > 2.0) {
-          const dy = (target.latitude - this.latitude) * 111000;
-          const dx = (target.longitude - this.longitude) * 111000 * Math.cos((this.latitude * Math.PI) / 180);
-          
-          const angle = Math.atan2(dy, dx);
-          
-          // Speed is m/s. Move by speed * 1s
-          const moveDist = this.speed * 1.0; 
-          const moveY = moveDist * Math.sin(angle);
-          const moveX = moveDist * Math.cos(angle);
-
-          this.latitude += moveY / 111000;
-          this.longitude += moveX / (111000 * Math.cos((this.latitude * Math.PI) / 180));
-        } else {
+        const moveDist = this.speed * 1.0; 
+        if (dist <= moveDist) {
           // Reached current waypoint
+          this.latitude = target.latitude;
+          this.longitude = target.longitude;
           console.log(`[Drone ${this.droneId}] Reached waypoint index ${this.currentWaypointIndex} at (${this.latitude.toFixed(6)}, ${this.longitude.toFixed(6)})`);
           this.currentWaypointIndex++;
           if (this.currentWaypointIndex >= this.waypoints.length) {
             console.log(`[Drone ${this.droneId}] Mission path completed. Returning to base.`);
             this.status = 'RETURNING';
           }
+        } else {
+          const dy = (target.latitude - this.latitude) * 111000;
+          const dx = (target.longitude - this.longitude) * 111000 * Math.cos((this.latitude * Math.PI) / 180);
+          
+          const angle = Math.atan2(dy, dx);
+          const moveY = moveDist * Math.sin(angle);
+          const moveX = moveDist * Math.cos(angle);
+
+          this.latitude += moveY / 111000;
+          this.longitude += moveX / (111000 * Math.cos((this.latitude * Math.PI) / 180));
         }
 
         // Calculate battery depletion: base + speed multiplier + climb penalty
@@ -225,23 +229,25 @@ export class SimulatedDrone {
         else if (this.speed > returnSpeed) this.speed = Math.max(returnSpeed, this.speed - 1.5);
 
         // Adjust altitude
-        if (this.altitude < returnAlt) this.altitude = Math.min(returnAlt, this.altitude + 1.5);
-        else if (this.altitude > returnAlt) this.altitude = Math.max(returnAlt, this.altitude - 1.5);
+        if (this.altitude < returnAlt) this.altitude = Math.min(returnAlt, this.altitude + 3.0);
+        else if (this.altitude > returnAlt) this.altitude = Math.max(returnAlt, this.altitude - 3.0);
 
-        if (dist > 3.0) {
+        const moveDist = this.speed * 1.0;
+        if (dist <= moveDist) {
+          this.latitude = this.homeLatitude;
+          this.longitude = this.homeLongitude;
+          console.log(`[Drone ${this.droneId}] Arrived back above home base. Landing...`);
+          this.status = 'LANDING';
+        } else {
           const dy = (this.homeLatitude - this.latitude) * 111000;
           const dx = (this.homeLongitude - this.longitude) * 111000 * Math.cos((this.latitude * Math.PI) / 180);
           
           const angle = Math.atan2(dy, dx);
-          const moveDist = this.speed * 1.0;
           const moveY = moveDist * Math.sin(angle);
           const moveX = moveDist * Math.cos(angle);
 
           this.latitude += moveY / 111000;
           this.longitude += moveX / (111000 * Math.cos((this.latitude * Math.PI) / 180));
-        } else {
-          console.log(`[Drone ${this.droneId}] Arrived back above home base. Landing...`);
-          this.status = 'LANDING';
         }
 
         // Return flight battery & temperature drain
@@ -252,7 +258,7 @@ export class SimulatedDrone {
       }
 
       case 'LANDING': {
-        const descentRate = 1.5; // 1.5 m/s descent
+        const descentRate = 3.0; // 3.0 m/s descent
         this.speed = 0.5; // slow drift horizontal speed
 
         if (this.altitude > 0) {

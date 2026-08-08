@@ -61,9 +61,14 @@ export async function listDrones(req: AuthenticatedRequest, res: Response) {
             // ignore JSON parse errors
           }
         }
+        const waypoints = await prisma.waypoint.findMany({
+          where: { droneId: drone.id },
+          orderBy: { orderIndex: 'asc' },
+        });
         return {
           ...drone,
           isOnline,
+          waypoints,
         };
       })
     );
@@ -106,9 +111,15 @@ export async function getDrone(req: AuthenticatedRequest, res: Response) {
       } catch (e) {}
     }
 
+    const waypoints = await prisma.waypoint.findMany({
+      where: { droneId: drone.id },
+      orderBy: { orderIndex: 'asc' },
+    });
+
     return res.json({
       ...drone,
       isOnline,
+      waypoints,
     });
   } catch (error) {
     console.error('Get drone error:', error);

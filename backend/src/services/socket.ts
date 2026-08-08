@@ -54,3 +54,13 @@ export function broadcastAlert(alert: any) {
     console.log(`🔔 Broadcasted alert to clients:`, alert.type);
   }
 }
+
+/**
+ * Helper to emit session completion event over WebSockets
+ */
+export function broadcastSessionCompilation(flightSessionId: string) {
+  if (io) {
+    io.emit('session-compiled', { flightSessionId });
+    console.log(`💼 Broadcasted session compilation completed for: ${flightSessionId}`);
+  }
+}

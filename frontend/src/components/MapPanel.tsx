@@ -145,7 +145,14 @@ export const MapPanel: React.FC<MapPanelProps> = ({
   }
 
   // Format Polylines path positions
-  const waypointPositions = waypoints.map((wp) => [wp.latitude, wp.longitude] as [number, number]);
+  // If there are draft waypoints (user is designing a route), show those.
+  // Otherwise, if the selected drone is actively flying and has waypoints in its state, show those!
+  let activeWaypoints = waypoints;
+  if (waypoints.length === 0 && selectedDrone?.waypoints && selectedDrone.status !== 'IDLE') {
+    activeWaypoints = selectedDrone.waypoints;
+  }
+
+  const waypointPositions = activeWaypoints.map((wp) => [wp.latitude, wp.longitude] as [number, number]);
   const historicalPositions = historicalTrack.map((log) => [log.latitude, log.longitude] as [number, number]);
 
   return (
@@ -180,6 +187,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
         {/* Active Drones Markers */}
         {drones.map((drone) => {
           if (!drone.currentLatitude || !drone.currentLongitude) return null;
+          // Filter to only show the selected drone on the map
+          if (selectedDroneId && drone.id !== selectedDroneId) return null;
           return (
             <Marker
               key={drone.id}
@@ -202,8 +211,8 @@ export const MapPanel: React.FC<MapPanelProps> = ({
           );
         })}
 
-        {/* Planned Mission Waypoints */}
-        {waypoints.map((wp, idx) => (
+        {/* Planned/Active Mission Waypoints */}
+        {activeWaypoints.map((wp, idx) => (
           <Marker
             key={`wp-${idx}`}
             position={[wp.latitude, wp.longitude]}

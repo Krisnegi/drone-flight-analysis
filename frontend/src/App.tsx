@@ -78,6 +78,7 @@ export default function App() {
   // WebSocket reference
   const socketRef = useRef<Socket | null>(null);
   const lastSeenRef = useRef<Record<string, number>>({});
+  const droneStatusesRef = useRef<Record<string, string>>({});
 
   // Fetch helper wrapper with token header
   const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
@@ -121,8 +122,9 @@ export default function App() {
         if (droneData.length > 0 && !selectedDroneId) {
           setSelectedDroneId(droneData[0].id);
         }
-        // Initialize last seen timestamps for currently online drones
+        // Initialize last seen and statuses refs
         droneData.forEach((d: Drone) => {
+          droneStatusesRef.current[d.id] = d.status;
           if (d.isOnline) {
             lastSeenRef.current[d.id] = Date.now();
           }
@@ -156,23 +158,15 @@ export default function App() {
       // Record last seen heartbeat
       lastSeenRef.current[payload.droneId] = Date.now();
 
+      // Retrieve previous status from Ref to avoid React stale closure bugs
+      const prevStatus = droneStatusesRef.current[payload.droneId] || 'IDLE';
+      const isLandedPacket = prevStatus !== 'IDLE' && payload.status === 'IDLE';
+
+      // Update the status ref immediately
+      droneStatusesRef.current[payload.droneId] = payload.status;
+
       // Update drone coordinates in state list
       setDrones((prevDrones) => {
-        const existingDrone = prevDrones.find((d) => d.id === payload.droneId);
-        
-        // If a drone completes landing (transitions back to IDLE), refresh historical sessions and stats
-        if (existingDrone && existingDrone.status !== 'IDLE' && payload.status === 'IDLE') {
-          apiFetch('/api/sessions')
-            .then((res) => res.json())
-            .then((data) => setSessions(data))
-            .catch((err) => console.error('Error refreshing sessions:', err));
-            
-          apiFetch('/api/analytics/dashboard')
-            .then((res) => res.json())
-            .then((data) => setStats(data))
-            .catch((err) => console.error('Error refreshing stats:', err));
-        }
-
         return prevDrones.map((d) =>
           d.id === payload.droneId
             ? {
@@ -188,8 +182,8 @@ export default function App() {
         );
       });
 
-      // Append selected drone telemetry to active charts history
-      if (payload.droneId === selectedDroneId && payload.status !== 'IDLE') {
+      // Append selected drone telemetry to active charts history (only during flight, plus the touchdown frame)
+      if (payload.droneId === selectedDroneId && (payload.status !== 'IDLE' || isLandedPacket)) {
         setLiveHistory((prev) => {
           const timestamp = new Date(payload.timestamp).toLocaleTimeString([], {
             hour: '2-digit',
@@ -197,7 +191,8 @@ export default function App() {
             second: '2-digit',
           });
           const newHistory = [...prev, { ...payload, time: timestamp }];
-          if (newHistory.length > 25) newHistory.shift(); // keep last 25 ticks
+          // Allow tracking up to 500 ticks (~8.3 mins) to display the overall session trajectory
+          if (newHistory.length > 500) newHistory.shift(); 
           return newHistory;
         });
       }
@@ -214,6 +209,25 @@ export default function App() {
       apiFetch('/api/analytics/dashboard')
         .then((res) => res.json())
         .then((data) => setStats(data));
+    });
+
+    // Bind background compilation completion notification
+    socketRef.current.on('session-compiled', () => {
+      // Re-trigger stats counts and session history lists
+      apiFetch('/api/sessions')
+        .then((res) => res.json())
+        .then((data) => setSessions(data))
+        .catch((err) => console.error('Error refreshing sessions:', err));
+
+      apiFetch('/api/analytics/dashboard')
+        .then((res) => res.json())
+        .then((data) => setStats(data))
+        .catch((err) => console.error('Error refreshing stats:', err));
+
+      apiFetch('/api/drones')
+        .then((res) => res.json())
+        .then((data) => setDrones(data))
+        .catch((err) => console.error('Error refreshing drones:', err));
     });
 
     return () => {
@@ -338,8 +352,15 @@ export default function App() {
 
       // Reset coordinates and refresh drones list
       setWaypoints([]);
+      setLiveHistory([]); // Clear chart history for the new flight session
+      
       const droneRes = await apiFetch('/api/drones');
       setDrones(await droneRes.json());
+
+      // Refresh dashboard stats so that "Active Sessions" card immediately shows "1"
+      const statsRes = await apiFetch('/api/analytics/dashboard');
+      setStats(await statsRes.json());
+
       setActiveTab('monitor');
     } catch (err: any) {
       alert(`Dispatch failed: ${err.message}`);
@@ -839,9 +860,9 @@ export default function App() {
                 )}
 
                 {/* Telemetry charts */}
-                <div className="flex-1 bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur flex flex-col justify-between space-y-6">
+                <div className="bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur flex flex-col space-y-6 h-[340px] shrink-0">
                   <div>
-                    <h3 className="text-sm font-semibold mb-4">Altitude Profile (meters)</h3>
+                    <h3 className="text-sm font-semibold mb-3">Altitude Profile (meters)</h3>
                     <div className="h-28 w-full">
                       {liveHistory.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
@@ -867,7 +888,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <h3 className="text-sm font-semibold mb-4">Speed Vector (m/s)</h3>
+                    <h3 className="text-sm font-semibold mb-3">Speed Vector (m/s)</h3>
                     <div className="h-28 w-full">
                       {liveHistory.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">

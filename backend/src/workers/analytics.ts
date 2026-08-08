@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import { queueConnection } from '../services/queue';
 import { prisma } from '../services/db';
 import { flushTelemetryBuffer } from '../services/mqtt';
+import { broadcastSessionCompilation } from '../services/socket';
 
 function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dy = (lat2 - lat1) * 111000;
@@ -75,6 +76,9 @@ export function initAnalyticsWorker() {
         where: { id: updatedSession.droneId },
         data: { status: 'IDLE' },
       });
+
+      // Broadcast compilation complete notification to all clients
+      broadcastSessionCompilation(flightSessionId);
 
       console.log(`✔ Finished analytics compilation for Flight Session: ${flightSessionId}.`);
       console.log(`   - Distance: ${distanceKM} km`);
