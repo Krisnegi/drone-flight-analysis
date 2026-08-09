@@ -6,7 +6,7 @@ interface AuthProps {
   onAuthSuccess: (user: User, token: string) => void;
 }
 
-const BASE_URL = 'http://localhost:4000';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
