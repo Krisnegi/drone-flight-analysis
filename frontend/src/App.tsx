@@ -15,6 +15,8 @@ import {
   Battery,
   Shield,
   Activity,
+  Menu,
+  X,
 } from 'lucide-react';
 import { Auth } from './components/Auth';
 import { MapPanel } from './components/MapPanel';
@@ -70,6 +72,7 @@ export default function App() {
   const [inspectedSession, setInspectedSession] = useState<FlightSession | null>(null);
   const [inspectedSessionTrack, setInspectedSessionTrack] = useState<TelemetryLog[]>([]);
   const [logsPage, setLogsPage] = useState(1);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Forms States
   const [newDroneName, setNewDroneName] = useState('');
@@ -276,6 +279,7 @@ export default function App() {
   // Reset logs tab pagination page when switching tabs
   useEffect(() => {
     setLogsPage(1);
+    setMobileMenuOpen(false);
   }, [activeTab]);
 
   // Fetch telemetry logs for session inspection
@@ -439,10 +443,126 @@ export default function App() {
   const paginatedSessions = sessions.slice(logsStartIndex, logsStartIndex + ITEMS_PER_PAGE);
 
   return (
-    <div className="min-h-screen bg-slate-950 flex text-slate-100 font-sans">
+    <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row text-slate-100 font-sans">
 
-      {/* Sidebar Navigation */}
-      <aside className="w-64 border-r border-slate-900 bg-slate-900/35 backdrop-blur flex flex-col justify-between shrink-0">
+      {/* Mobile Top Bar */}
+      <header className="lg:hidden flex items-center justify-between px-6 py-4 border-b border-slate-900 bg-slate-900/35 backdrop-blur z-20 shrink-0">
+        <div className="flex items-center space-x-2 text-indigo-500">
+          <Plane className="h-6 w-6 animate-pulse" />
+          <span className="text-lg font-bold tracking-wider text-slate-100">AERO-FLOW</span>
+        </div>
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+        >
+          {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </header>
+
+      {/* Mobile Menu Drawer Overlay */}
+      {mobileMenuOpen && (
+        <div className="lg:hidden fixed top-[61px] left-0 right-0 bottom-0 bg-slate-950/95 backdrop-blur z-10 flex flex-col justify-between p-6 overflow-y-auto border-t border-slate-900">
+          <div className="space-y-6">
+            {/* User Profile */}
+            <div className="flex items-center space-x-3 pb-4 border-b border-slate-900">
+              <div className="h-10 w-10 bg-indigo-500/20 text-indigo-400 font-bold rounded-full flex items-center justify-center border border-indigo-500/30">
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{user.name}</p>
+                <div className="flex items-center text-[10px] text-slate-400 font-medium tracking-wide space-x-1">
+                  {user.role === 'ADMIN' ? (
+                    <>
+                      <Shield className="h-3 w-3 text-indigo-400 shrink-0" />
+                      <span>Role: Admin</span>
+                    </>
+                  ) : (
+                    <span>Role: Pilot</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Nav Tabs */}
+            <nav className="space-y-2">
+              <button
+                onClick={() => {
+                  setActiveTab('monitor');
+                  setInspectedSession(null);
+                }}
+                className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'monitor' && !inspectedSession
+                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                  }`}
+              >
+                <LayoutDashboard className="h-5 w-5" />
+                <span>Real-Time Monitor</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('fleet');
+                  setInspectedSession(null);
+                }}
+                className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'fleet'
+                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                  }`}
+              >
+                <Plane className="h-5 w-5" />
+                <span>My Drones</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('logs');
+                  setInspectedSession(null);
+                }}
+                className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'logs' || inspectedSession
+                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                  }`}
+              >
+                <History className="h-5 w-5" />
+                <span>Flight History Logs</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('alerts');
+                  setInspectedSession(null);
+                }}
+                className={`w-full flex items-center space-x-3 py-3 px-4 rounded-xl text-sm font-medium transition-all ${activeTab === 'alerts'
+                  ? 'bg-indigo-600 text-slate-100 shadow-md shadow-indigo-600/25'
+                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                  }`}
+              >
+                <div className="relative">
+                  <AlertTriangle className="h-5 w-5" />
+                  {alerts.filter((a) => !a.resolved).length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-ping"></span>
+                  )}
+                </div>
+                <span>Safety Alerts</span>
+              </button>
+            </nav>
+          </div>
+
+          {/* Log Out */}
+          <div className="pt-4 border-t border-slate-900 mt-auto">
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center justify-center space-x-2 py-3 px-4 border border-slate-800 rounded-xl text-sm font-medium text-red-400 hover:bg-red-500/10 hover:border-red-500/30 transition-all cursor-pointer"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Secure Log Out</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar Navigation (Desktop) */}
+      <aside className="hidden lg:flex w-64 border-r border-slate-900 bg-slate-900/35 backdrop-blur flex-col justify-between shrink-0">
         <div>
           {/* Logo Brand */}
           <div className="flex items-center space-x-2 px-6 py-6 border-b border-slate-900 text-indigo-500">
@@ -552,7 +672,7 @@ export default function App() {
 
         {/* Top Header stats aggregations */}
         {stats && (
-          <header className="grid grid-cols-5 gap-4 px-8 py-6 border-b border-slate-900 bg-slate-900/10 backdrop-blur shrink-0">
+          <header className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 px-4 md:px-8 py-4 md:py-6 border-b border-slate-900 bg-slate-900/10 backdrop-blur shrink-0">
             <div className="bg-slate-900/30 border border-slate-900 p-4 rounded-2xl flex items-center space-x-4">
               <Plane className="h-10 w-10 text-indigo-400 bg-indigo-500/10 p-2 rounded-xl" />
               <div>
@@ -585,7 +705,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-slate-900/30 border border-slate-900 p-4 rounded-2xl flex items-center space-x-4">
+            <div className="bg-slate-900/30 border border-slate-900 p-4 rounded-2xl flex items-center space-x-4 col-span-2 md:col-span-1 lg:col-span-1">
               <AlertTriangle className="h-10 w-10 text-red-400 bg-red-500/10 p-2 rounded-xl" />
               <div>
                 <p className="text-xs font-semibold text-slate-400">Active Warnings</p>
@@ -595,24 +715,25 @@ export default function App() {
           </header>
         )}
 
-        <div className="flex-1 p-8 flex flex-col">
+        <div className="flex-1 p-4 md:p-8 flex flex-col">
 
           {/* TAB 1: REAL-TIME MONITOR */}
           {activeTab === 'monitor' && !inspectedSession && (
-            <div className="flex-1 grid grid-cols-12 gap-8">
+            <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8">
 
               {/* Left Column: Map & Controls */}
-              <div className="col-span-8 flex flex-col space-y-6">
+              <div className="col-span-1 lg:col-span-8 flex flex-col space-y-6">
 
-                {/* Select Drone Panel */}
-                <div className="flex items-center justify-between bg-slate-900/25 border border-slate-900 p-4 rounded-2xl backdrop-blur">
-                  <div className="flex items-center space-x-3">
-                    <Plane className="h-6 w-6 text-indigo-400" />
-                    <span className="font-semibold text-sm">Select Drone:</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-900/25 border border-slate-900 p-4 rounded-2xl backdrop-blur gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                    <div className="flex items-center space-x-3">
+                      <Plane className="h-6 w-6 text-indigo-400 shrink-0" />
+                      <span className="font-semibold text-sm whitespace-nowrap">Select Drone:</span>
+                    </div>
                     <select
                       value={selectedDroneId || ''}
                       onChange={(e) => setSelectedDroneId(e.target.value || null)}
-                      className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-auto"
                     >
                       {drones.map((d) => (
                         <option key={d.id} value={d.id}>
@@ -623,7 +744,7 @@ export default function App() {
                   </div>
 
                   {selectedDrone && (
-                    <div className="flex space-x-2 shrink-0 ml-4">
+                    <div className="flex space-x-2 shrink-0 w-full sm:w-auto justify-end sm:justify-start">
                       <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${selectedDrone.status === 'IDLE' ? 'bg-slate-800 text-slate-400' :
                         selectedDrone.status === 'FLYING' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
                           selectedDrone.status === 'RETURNING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
@@ -710,7 +831,7 @@ export default function App() {
 
                             <div className="flex flex-col space-y-2 max-h-60 overflow-y-auto pr-1">
                               {waypoints.map((wp, idx) => (
-                                <div key={idx} className="bg-slate-900 border border-slate-800 text-xs px-3.5 py-2.5 rounded-xl flex items-center justify-between space-x-4">
+                                <div key={idx} className="bg-slate-900 border border-slate-800 text-xs px-3.5 py-2.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:space-x-4">
                                   <div className="flex items-center space-x-3 overflow-hidden">
                                     <span className="font-bold text-indigo-400 shrink-0">#{idx + 1}</span>
                                     <span className="font-mono text-slate-400 text-[11px] truncate">
@@ -718,7 +839,7 @@ export default function App() {
                                     </span>
                                   </div>
 
-                                  <div className="flex items-center space-x-3 shrink-0">
+                                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0">
                                     {/* Altitude Setting */}
                                     <div className="flex items-center space-x-1">
                                       <span className="text-[10px] text-slate-500 font-medium">Altitude:</span>
@@ -792,7 +913,7 @@ export default function App() {
                         <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-xl text-xs text-indigo-200">
                           Drone is currently executing flight tasks. You can send immediate override telemetry instructions.
                         </div>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <button
                             onClick={() => handleOverride('RETURN_TO_BASE')}
                             className="py-3 px-4 bg-amber-600 hover:bg-amber-500 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-amber-600/15"
@@ -819,7 +940,7 @@ export default function App() {
               </div>
 
               {/* Right Column: Live Status & Charts */}
-              <div className="col-span-4 flex flex-col space-y-6">
+              <div className="col-span-1 lg:col-span-4 flex flex-col space-y-6">
 
                 {/* Live parameters cards */}
                 {selectedDrone && (
@@ -925,7 +1046,7 @@ export default function App() {
               {user.role === 'ADMIN' && (
                 <div className="bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur">
                   <h3 className="text-base font-semibold mb-4">Register New Drone</h3>
-                  <form onSubmit={handleCreateDrone} className="grid grid-cols-4 gap-4">
+                  <form onSubmit={handleCreateDrone} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <input
                       type="text"
                       required
@@ -962,7 +1083,7 @@ export default function App() {
               )}
 
               {/* Drones list table */}
-              <div className="bg-slate-900/25 border border-slate-900 rounded-2xl overflow-hidden backdrop-blur">
+              <div className="bg-slate-900/25 border border-slate-900 rounded-2xl overflow-x-auto backdrop-blur">
                 <table className="min-w-full divide-y divide-slate-900">
                   <thead className="bg-slate-900/35">
                     <tr>
@@ -1077,14 +1198,13 @@ export default function App() {
                     </table>
                   </div>
 
-                  {/* Pagination Control Bar */}
-                  <div className="flex items-center justify-between px-6 py-4 bg-slate-900/35 border-t border-slate-900 rounded-b-2xl">
-                    <div className="text-xs text-slate-400">
+                  <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 bg-slate-900/35 border-t border-slate-900 rounded-b-2xl gap-4">
+                    <div className="text-xs text-slate-400 text-center sm:text-left">
                       Showing <span className="font-semibold text-slate-200">{sessions.length === 0 ? 0 : logsStartIndex + 1}</span> to{' '}
                       <span className="font-semibold text-slate-200">{Math.min(logsStartIndex + ITEMS_PER_PAGE, sessions.length)}</span> of{' '}
                       <span className="font-semibold text-slate-200">{sessions.length}</span> flights
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center justify-between sm:justify-end space-x-2 w-full sm:w-auto">
                       <button
                         onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
                         disabled={currentLogsPage === 1}
@@ -1107,8 +1227,8 @@ export default function App() {
                 </div>
               ) : (
                 // Detailed inspector panel for a single flight session
-                <div className="flex-1 grid grid-cols-12 gap-8">
-                  <div className="col-span-8 flex flex-col space-y-4">
+                <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  <div className="col-span-1 lg:col-span-8 flex flex-col space-y-4">
                     <div className="flex justify-between items-center bg-slate-900/25 border border-slate-900 p-4 rounded-2xl backdrop-blur shrink-0">
                       <div>
                         <h3 className="text-base font-semibold">Inspecting Flight session</h3>
@@ -1137,7 +1257,7 @@ export default function App() {
                   </div>
 
                   {/* Summary analytics cards */}
-                  <div className="col-span-4 bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur flex flex-col space-y-6">
+                  <div className="col-span-1 lg:col-span-4 bg-slate-900/25 border border-slate-900 p-6 rounded-2xl backdrop-blur flex flex-col space-y-6">
                     <h3 className="text-base font-semibold">Post-Flight Analytics Summary</h3>
 
                     <div className="space-y-4">
