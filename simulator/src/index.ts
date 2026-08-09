@@ -2,11 +2,22 @@ import mqtt from 'mqtt';
 import dotenv from 'dotenv';
 import { SimulatedDrone } from './drone';
 
+import http from 'http';
+
 // Load environment variables
 dotenv.config();
 
 const mqttUrl = process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
 const droneIds = (process.env.SIMULATED_DRONE_IDS || 'drone-alpha-111,drone-beta-222').split(',');
+
+// Simple HTTP server to bind to $PORT for free Render Web Service hosting
+const port = process.env.PORT || 4001;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'simulator-active' }));
+}).listen(port, () => {
+  console.log(`📡 Simulator health check server listening on port ${port}`);
+});
 
 console.log(`🔌 Connecting simulator to MQTT broker at ${mqttUrl}...`);
 const client = mqtt.connect(mqttUrl);
